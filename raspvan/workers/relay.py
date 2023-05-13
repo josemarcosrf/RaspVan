@@ -9,13 +9,23 @@ from smbus2 import SMBus
 
 logger = logging.getLogger(__name__)
 
+import coloredlogs
+
+coloredlogs.install(logger=logger, level=logging.DEBUG)
+
 MIN_CHANNEL = 1
 MAX_CHANNEL = 4
 DEVICE_ADDR = 0x27
 
-OFF_STATE = [1] * 4
 ON = True
 OFF = False
+OFF_STATE = [0] * 4
+
+# NOTE:
+# connected in NO (normally open) => ON = True / OFF = False
+# connected in NC (normally close) => ON = False / OFF = True
+# So we invert the passed switch mode in case of NC
+RELAY_MODE = "NC"
 
 
 class RedisLightsMemory:
@@ -28,7 +38,7 @@ class RedisLightsMemory:
         self.r.set(self.key, json.dumps(state))
 
     def get(self):
-        return json.loads(self.r.get(self.key))
+        return json.loads(self.r.get(self.key) or "null")
 
 
 class RelayClient:
@@ -63,9 +73,13 @@ class RelayClient:
         mask = "".join(map(str, new_state))
         mask_val = eval(f"0b{mask}1111")
 
+        logger.debug(f"Calculated state: {new_state} (mask: {mask_val})")
+
         return new_state, mask_val
 
     def switch(self, channels: List[int], mode: int) -> List[int]:
+        if RELAY_MODE == "NC":
+            mode ^= 1  # invert the mode
         try:
             self.validate(channels, mode)
         except ValueError as ve:
@@ -82,15 +96,18 @@ class RelayClient:
 
 
 if __name__ == "__main__":
-    RelayClient = RelayClient()
+    rc = RelayClient()
 
     # switch all one by one
-    r = OFF_STATE
+    print("---------- Switching ON one by one ----------")
     for c in range(MIN_CHANNEL, MAX_CHANNEL + 1):
-        RelayClient.switch([c], ON)
+        state = rc.switch([c], ON)
+        print(f"state is now {state}")
         time.sleep(1)
 
     # switch off one by one
+    print("---------- Switching OFF one by one ----------")
     for c in range(MAX_CHANNEL, MIN_CHANNEL - 1, -1):
-        RelayClient.switch([c], OFF)
+        state = rc.switch([c], OFF)
+        print(f"state is now {state}")
         time.sleep(1)
